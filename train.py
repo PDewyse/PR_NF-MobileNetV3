@@ -52,11 +52,6 @@ def training():
         total_loss += loss.item()
         correct += (predict == y).sum()
 
-        # fbatch.write("Epoch:{}\t batch:{}\t TrainedSample:{}\t TotalSample:{}\t Loss:{:.3f}\n".format(
-        #         epoch+1, batch+1, batch*args.b + len(y), total_sample, loss.item()
-        #     ))
-        # fbatch.flush()
-        
         if batch % 50 == 0 and epoch % 1 == 0:
             # generate signal propagation plots
             metrics = [get_average_channel_squared_mean_by_depth, get_average_channel_variance_by_depth]
@@ -66,11 +61,6 @@ def training():
                 epoch+1, args.e, batch+1,length, loss.item()
             ))
 
-    # fepoch.write("Epoch:{}\t Loss:{:.3f}\t lr:{:.5f}\t acc:{:.3%}\n".format(
-    #     epoch + 1, total_loss/length, optimizer.param_groups[0]['lr'], float(correct)/ total_sample
-    # ))
-    # fepoch.flush()
-            
     print("| Epoch {} Summary:\n| Average Train Loss: {:.4f}\n| Average training compute time (ms): {}".format(
         epoch+1, total_loss/length, train_compute_time/length
         ))
@@ -110,11 +100,6 @@ def evaluating():
         all_targets.extend(y.cpu().numpy())
         all_outputs.extend(torch.softmax(output, dim=1).detach().cpu().numpy())
 
-        # if batch % 10 == 0:
-        #     print("| Epoch: {}/{}\t| Batch: {}/{} \t| Val Loss: {:.4f}\t|".format(
-        #         epoch+1, args.e, batch+1,length, loss.item()
-        #     ))
-
     acc = float(correct) / total_sample
 
     all_targets = np.array(all_targets)
@@ -125,10 +110,6 @@ def evaluating():
         auc_scores.append(auc_score)
 
     average_auc = np.mean(auc_scores)
-    # feval.write("Epoch:{}\t Loss:{:.3f}\t lr:{:.5f}\t acc:{:.3%}\n".format(
-    #     epoch + 1, total_loss / length, optimizer.param_groups[0]['lr'], acc
-    # ))
-    # feval.flush()
 
     print("| Epoch {} Summary:\n| Average Val Loss: {:.4f}\n| Val Acc: {:.4f}\n| Average AUC: {:.4f}".format(
         epoch+1, total_loss/length, acc, average_auc
@@ -178,8 +159,8 @@ if __name__ == '__main__':
     traindata = torchvision.datasets.CIFAR100(root='./data', train=True, download=True, transform=transform_train)
     testdata = torchvision.datasets.CIFAR100(root='./data', train=False, download=True, transform=transform_test)
     
-    trainloader = DataLoader(traindata, batch_size=args.b, shuffle=True) #, num_workers=2 # changed num_workers to 0
-    testloader = DataLoader(testdata, batch_size=args.b, shuffle=False) #, num_workers=2
+    trainloader = DataLoader(traindata, batch_size=args.b, shuffle=True)
+    testloader = DataLoader(testdata, batch_size=args.b, shuffle=False)
     
     # define net
     print("=================================================================")
@@ -217,7 +198,6 @@ if __name__ == '__main__':
     if not os.path.exists(checkpoint_path):
         os.makedirs(checkpoint_path)
     spp_path = os.path.join(checkpoint_path, 'spp_plots')
-    # spp_path = "./Temp" # for testing spp layout
     if not os.path.exists(spp_path):
         os.makedirs(spp_path)
     
@@ -244,50 +224,42 @@ if __name__ == '__main__':
     # Get the number of classes (for cifar100, it is 100)
     num_classes = len(traindata.classes)
     diff = "calculating..."
-    with open(os.path.join(checkpoint_path, 'EpochLog.txt'), 'w') as fepoch:
-        with open(os.path.join(checkpoint_path, 'BatchLog.txt'), 'w') as fbatch:
-            with open(os.path.join(checkpoint_path, 'EvalLog.txt'), 'w') as feval:
-                with open(os.path.join(checkpoint_path, 'Best.txt'), 'w') as fbest:
-                    for epoch in range(args.e):
-                        epoch_start = datetime.datetime.now()
-                        print(f"Training Epoch {epoch+1}/{args.e} (ETA = {diff:.4}s)")
-                        train_loss, train_compute_time = training()
+    
+    for epoch in range(args.e):
+        epoch_start = datetime.datetime.now()
+        print(f"Training Epoch {epoch+1}/{args.e} (ETA = {diff:.4}s)")
+        train_loss, train_compute_time = training()
 
-                        print(f"Evaluating Epoch {epoch+1}/{args.e}")
-                        accuracy, val_loss, val_pred_time, average_auc = evaluating()
-                        
-                        scheduler.step()
+        print(f"Evaluating Epoch {epoch+1}/{args.e}")
+        accuracy, val_loss, val_pred_time, average_auc = evaluating()
+        
+        scheduler.step()
 
-                        print("--> Saving regular")
-                        torch.save(net.state_dict(), os.path.join(checkpoint_path, 'regularParam.pth'))
+        print("--> Saving regular")
+        torch.save(net.state_dict(), os.path.join(checkpoint_path, 'regularParam.pth'))
 
-                        if accuracy > best_acc:
-                            print("--> Saving best")
-                            torch.save(net.state_dict(), os.path.join(checkpoint_path, 'bestParam.pth'))
-
-                            # fbest.write("Epoch:{}\t Loss:{:.3f}\t lr:{:.5f}\t acc:{:.3%}\n".format(
-                            #     epoch + 1, averageloss, optimizer.param_groups[0]['lr'], accuracy
-                            # ))
-                            # fbest.flush()
-                            best_acc = accuracy
-                        
-                        # total training time for an epoch
-                        diff = (datetime.datetime.now() - epoch_start).total_seconds()
-                        total_train_time += diff
-                        print("=================================================================")
-                        print(f"Estimated Total training time: {(diff*args.e/3600):.4} hrs.")
-                        # log to wandb
-                        if args.log:
-                            wandb.log({"epoch": epoch,
-                                       "learning_rate": optimizer.param_groups[0]['lr'],
-                                       "accuracy (%)": accuracy*num_classes,
-                                       "average_auc": average_auc,
-                                       "train_loss": train_loss,
-                                       "val_loss": val_loss,
-                                       "train_compute_time (ms)": train_compute_time, # time spent for forward pass, backward pass, loss, and optimizer
-                                       "val_pred_time (ms)": val_pred_time, # time spent for forward pass only
-                                       "Training time": total_train_time
-                                        })
+        if accuracy > best_acc:
+            print("--> Saving best")
+            torch.save(net.state_dict(), os.path.join(checkpoint_path, 'bestParam.pth'))
+            best_acc = accuracy
+        
+        # total training time for an epoch
+        diff = (datetime.datetime.now() - epoch_start).total_seconds()
+        total_train_time += diff
+        print("=================================================================")
+        print(f"Estimated Total training time: {(diff*args.e/3600):.4} hrs.")
+        # log to wandb
+        if args.log:
+            wandb.log({"epoch": epoch,
+                        "learning_rate": optimizer.param_groups[0]['lr'],
+                        "accuracy (%)": accuracy*num_classes,
+                        "average_auc": average_auc,
+                        "train_loss": train_loss,
+                        "val_loss": val_loss,
+                        "train_compute_time (ms)": train_compute_time, # time spent for forward pass, backward pass, loss, and optimizer
+                        "val_pred_time (ms)": val_pred_time, # time spent for forward pass only
+                        "Training time": total_train_time
+                        })
     print("=================================================================")
     print(f"Total training time: {total_train_time/3600:.4}hrs.")
     print(f"Average training time per epoch: {total_train_time / args.e:.4}s.")
